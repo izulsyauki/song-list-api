@@ -1,9 +1,10 @@
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
-import mysql from "mysql2";
 import multer from "multer";
 import path from "path";
+import mysql from "mysql2/promise";
+import fs from "fs";
 
 const app = express();
 const port = 3030;
@@ -13,7 +14,7 @@ app.use(bodyParser.json());
 app.use("/uploads", express.static("uploads"));
 
 // koneksi ke MySQL
-const db = mysql.createConnection({
+const db = await mysql.createConnection({
     host: "localhost",
     user: "root",
     password: "",
@@ -29,57 +30,88 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// ENDPOINT
-
-// Get semua lagu
-app.get("/lagu", (req, res) => {
-    db.query("SELECT * FROM lagu", (err, results) => {
-        if (err) return res.status(500).send(err);
-        res.json(results);
-    });
+// endpoint GET semua lagu
+app.get("/lagu", async (req, res) => {
+    try {
+        const [results] = await db.query("SELECT * FROM lagu");
+        res.json({ success: true, data: results });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
-// Tambah lagu
-app.post("/lagu", upload.single("gambar"), (req, res) => {
-    const { kode_lagu, judul_lagu, pencipta, penyanyi, jenis } = req.body;
-    const gambar = req.file ? req.file.filename : null;
+// endpoint POST tambah lagu dengan generate kode otomatis
+app.post("/lagu", upload.single("gambar"), async (req, res) => {
+    try {
+        const { judul_lagu, pencipta, penyanyi, jenis } = req.body;
+        const gambar = req.file ? req.file.filename : null;
 
-    db.query(
-        "INSERT INTO lagu VALUES (?, ?, ?, ?, ?, ?)",
-        [kode_lagu, judul_lagu, pencipta, penyanyi, jenis, gambar],
-        (err) => {
-            if (err) return res.status(500).send(err);
-            res.send("Lagu ditambahkan");
+        const [rows] = await db.query("SELECT MAX(kode_lagu) AS lastCode FROM lagu");
+        const lastCode = rows[0].lastCode;
+        let newCode;
+
+        if (!lastCode) {
+            newCode = "LG00001";
+        } else {
+            const number = parseInt(lastCode.slice(2)) + 1;
+            newCode = "LG" + String(number).padStart(5, "0");
         }
-    );
+
+        await db.query(
+            "INSERT INTO lagu (kode_lagu, judul_lagu, pencipta, penyanyi, jenis, gambar) VALUES (?, ?, ?, ?, ?, ?)",
+            [newCode, judul_lagu, pencipta, penyanyi, jenis, gambar]
+        );
+
+        res.json({ success: true, message: "Lagu ditambahkan", kode_lagu: newCode });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
-// Update lagu
-app.put("/lagu/:kode", upload.single("gambar"), (req, res) => {
-    const { judul_lagu, pencipta, penyanyi, jenis } = req.body;
-    const gambar = req.file ? req.file.filename : null;
-    const kode = req.params.kode;
+// endpoint PUT update lagu
+app.put("/lagu/:kode", upload.single("gambar"), async (req, res) => {
+    try {
+        const { judul_lagu, pencipta, penyanyi, jenis } = req.body;
+        const gambar = req.file ? req.file.filename : null;
+        const kode = req.params.kode;
 
-    const query = gambar
-        ? "UPDATE lagu SET judul_lagu=?, pencipta=?, penyanyi=?, jenis=?, gambar=? WHERE kode_lagu=?"
-        : "UPDATE lagu SET judul_lagu=?, pencipta=?, penyanyi=?, jenis=? WHERE kode_lagu=?";
+        let query, values;
 
-    const values = gambar
-        ? [judul_lagu, pencipta, penyanyi, jenis, gambar, kode]
-        : [judul_lagu, pencipta, penyanyi, jenis, kode];
+        if (gambar) {
+            const [oldData] = await db.query("SELECT gambar FROM lagu WHERE kode_lagu = ?", [kode]);
+            if (oldData.length && oldData[0].gambar) {
+                fs.unlinkSync(`uploads/${oldData[0].gambar}`);
+            }
 
-    db.query(query, values, (err) => {
-        if (err) return res.status(500).send(err);
-        res.send("Lagu diperbarui");
-    });
+            query = "UPDATE lagu SET judul_lagu=?, pencipta=?, penyanyi=?, jenis=?, gambar=? WHERE kode_lagu=?";
+            values = [judul_lagu, pencipta, penyanyi, jenis, gambar, kode];
+        } else {
+            query = "UPDATE lagu SET judul_lagu=?, pencipta=?, penyanyi=?, jenis=? WHERE kode_lagu=?";
+            values = [judul_lagu, pencipta, penyanyi, jenis, kode];
+        }
+
+        await db.query(query, values);
+        res.json({ success: true, message: "Lagu diperbarui" });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
-// Hapus lagu
-app.delete("/lagu/:kode", (req, res) => {
-    db.query("DELETE FROM lagu WHERE kode_lagu=?", [req.params.kode], (err) => {
-        if (err) return res.status(500).send(err);
-        res.send("Lagu dihapus");
-    });
+// endpoint DELETE lagu
+app.delete("/lagu/:kode", async (req, res) => {
+    try {
+        const kode = req.params.kode;
+
+        const [oldData] = await db.query("SELECT gambar FROM lagu WHERE kode_lagu = ?", [kode]);
+        if (oldData.length && oldData[0].gambar) {
+            fs.unlinkSync(`uploads/${oldData[0].gambar}`);
+        }
+
+        await db.query("DELETE FROM lagu WHERE kode_lagu = ?", [kode]);
+        res.json({ success: true, message: "Lagu dihapus" });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 app.listen(port, () => console.log(`Server listening on http://localhost:${port}`));
