@@ -44,7 +44,7 @@ app.get("/lagu", async (req, res) => {
 app.post("/lagu", upload.single("gambar"), async (req, res) => {
     try {
         const { judul_lagu, pencipta, penyanyi, jenis } = req.body;
-        const gambar = req.file ? req.file.filename : null;
+        const gambar = req.file ? req.file.filename : "default-image.jpg";
 
         const [rows] = await db.query("SELECT MAX(kode_lagu) AS lastCode FROM lagu");
         const lastCode = rows[0].lastCode;
@@ -72,16 +72,16 @@ app.post("/lagu", upload.single("gambar"), async (req, res) => {
 app.put("/lagu/:kode", upload.single("gambar"), async (req, res) => {
     try {
         const { judul_lagu, pencipta, penyanyi, jenis } = req.body;
-        const gambar = req.file ? req.file.filename : null;
+        const gambar = req.file ? req.file.filename : "default-image.jpg";
         const kode = req.params.kode;
 
         let query, values;
 
         if (gambar) {
             const [oldData] = await db.query("SELECT gambar FROM lagu WHERE kode_lagu = ?", [kode]);
-            if (oldData.length && oldData[0].gambar) {
-                fs.unlinkSync(`uploads/${oldData[0].gambar}`);
-            }
+            // if (oldData.length && oldData[0].gambar) {
+            //     fs.unlinkSync(`uploads/${oldData[0].gambar}`);
+            // }
 
             query = "UPDATE lagu SET judul_lagu=?, pencipta=?, penyanyi=?, jenis=?, gambar=? WHERE kode_lagu=?";
             values = [judul_lagu, pencipta, penyanyi, jenis, gambar, kode];
@@ -103,9 +103,9 @@ app.delete("/lagu/:kode", async (req, res) => {
         const kode = req.params.kode;
 
         const [oldData] = await db.query("SELECT gambar FROM lagu WHERE kode_lagu = ?", [kode]);
-        if (oldData.length && oldData[0].gambar) {
-            fs.unlinkSync(`uploads/${oldData[0].gambar}`);
-        }
+        // if (oldData.length && oldData[0].gambar) {
+        //     fs.unlinkSync(`uploads/${oldData[0].gambar}`);
+        // }
 
         await db.query("DELETE FROM lagu WHERE kode_lagu = ?", [kode]);
         res.json({ success: true, message: "Lagu dihapus" });
